@@ -1,0 +1,115 @@
+diff a/gyp/pylib/gyp/generator/make.py b/gyp/pylib/gyp/generator/make.py	(rejected hunks)
+@@ -1725,7 +1736,8 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
+                         # into the link command, so we need lots of escaping.
+                         ldflags.append(r"-Wl,-rpath=\$$ORIGIN/")
+                         ldflags.append(r"-Wl,-rpath-link=\$(builddir)/")
+-                library_dirs = config.get("library_dirs", [])
++                if library_dirs := config.get("library_dirs", []):
++                    library_dirs = [Sourceify(self.Absolutify(i)) for i in library_dirs]
+                 ldflags += [("-L%s" % library_dir) for library_dir in library_dirs]
+                 self.WriteList(ldflags, "LDFLAGS_%s" % configname)
+                 if self.flavor == "mac":
+@@ -1882,21 +1894,20 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
+                         part_of_all,
+                         postbuilds=postbuilds,
+                     )
++            elif self.flavor in ("linux", "android"):
++                self.WriteMakeRule(
++                    [self.output_binary],
++                    link_deps,
++                    actions=["$(call create_archive,$@,$^)"],
++                )
+             else:
+-                if self.flavor in ("linux", "android"):
+-                    self.WriteMakeRule(
+-                        [self.output_binary],
+-                        link_deps,
+-                        actions=["$(call create_archive,$@,$^)"],
+-                    )
+-                else:
+-                    self.WriteDoCmd(
+-                        [self.output_binary],
+-                        link_deps,
+-                        "alink",
+-                        part_of_all,
+-                        postbuilds=postbuilds,
+-                    )
++                self.WriteDoCmd(
++                    [self.output_binary],
++                    link_deps,
++                    "alink",
++                    part_of_all,
++                    postbuilds=postbuilds,
++                )
+         elif self.type == "shared_library":
+             self.WriteLn(
+                 "%s: LD_INPUTS := %s"
+@@ -2435,36 +2448,55 @@ def GenerateOutput(target_list, target_dicts, data, params):
+         makefile_path = os.path.join(
+             options.toplevel_dir, options.generator_output, makefile_name
+         )
+-        srcdir = gyp.common.RelativePath(srcdir, options.generator_output)
++        srcdir = replace_sep(gyp.common.RelativePath(srcdir, options.generator_output))
+         srcdir_prefix = "$(srcdir)/"
+ 
+     flock_command = "flock"
+     copy_archive_arguments = "-af"
+     makedep_arguments = "-MMD"
++
++    # wasm-ld doesn't support --start-group/--end-group
++    link_commands = LINK_COMMANDS_LINUX
++    if flavor in ["wasi", "wasm"]:
++        link_commands = link_commands.replace(' -Wl,--start-group', '').replace(
++            ' -Wl,--end-group', ''
++        )
++
++    CC_target = replace_sep(GetEnvironFallback(("CC_target", "CC"), "$(CC)"))
++    AR_target = replace_sep(GetEnvironFallback(("AR_target", "AR"), "$(AR)"))
++    CXX_target = replace_sep(GetEnvironFallback(("CXX_target", "CXX"), "$(CXX)"))
++    LINK_target = replace_sep(GetEnvironFallback(("LINK_target", "LINK"), "$(LINK)"))
++    PLI_target = replace_sep(GetEnvironFallback(("PLI_target", "PLI"), "pli"))
++    CC_host = replace_sep(GetEnvironFallback(("CC_host", "CC"), "gcc"))
++    AR_host = replace_sep(GetEnvironFallback(("AR_host", "AR"), "ar"))
++    CXX_host = replace_sep(GetEnvironFallback(("CXX_host", "CXX"), "g++"))
++    LINK_host = replace_sep(GetEnvironFallback(("LINK_host", "LINK"), "$(CXX.host)"))
++    PLI_host = replace_sep(GetEnvironFallback(("PLI_host", "PLI"), "pli"))
++
+     header_params = {
+         "default_target": default_target,
+         "builddir": builddir_name,
+         "default_configuration": default_configuration,
+         "flock": flock_command,
+         "flock_index": 1,
+-        "link_commands": LINK_COMMANDS_LINUX,
++        "link_commands": link_commands,
+         "extra_commands": "",
+         "srcdir": srcdir,
+         "copy_archive_args": copy_archive_arguments,
+         "makedep_args": makedep_arguments,
+-        "CC.target": GetEnvironFallback(("CC_target", "CC"), "$(CC)"),
+-        "AR.target": GetEnvironFallback(("AR_target", "AR"), "$(AR)"),
+-        "CXX.target": GetEnvironFallback(("CXX_target", "CXX"), "$(CXX)"),
+-        "LINK.target": GetEnvironFallback(("LINK_target", "LINK"), "$(LINK)"),
+-        "PLI.target": GetEnvironFallback(("PLI_target", "PLI"), "pli"),
+-        "CC.host": GetEnvironFallback(("CC_host", "CC"), "gcc"),
+-        "AR.host": GetEnvironFallback(("AR_host", "AR"), "ar"),
+-        "CXX.host": GetEnvironFallback(("CXX_host", "CXX"), "g++"),
+-        "LINK.host": GetEnvironFallback(("LINK_host", "LINK"), "$(CXX.host)"),
+-        "PLI.host": GetEnvironFallback(("PLI_host", "PLI"), "pli"),
++        "CC.target": CC_target,
++        "AR.target": AR_target,
++        "CXX.target": CXX_target,
++        "LINK.target": LINK_target,
++        "PLI.target": PLI_target,
++        "CC.host": CC_host,
++        "AR.host": AR_host,
++        "CXX.host": CXX_host,
++        "LINK.host": LINK_host,
++        "PLI.host": PLI_host,
+     }
+     if flavor == "mac":
+-        flock_command = "./gyp-mac-tool flock"
++        flock_command = "%s gyp-mac-tool flock" % sys.executable
+         header_params.update(
+             {
+                 "flock": flock_command,
